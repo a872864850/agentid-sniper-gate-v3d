@@ -6,8 +6,9 @@ async function rpc(m,p){for(let k=0;k<10;k++){try{const r=await fetch(RPCS[ri++%
 const call=(to,data)=>rpc("eth_call",[{to,data},"latest"]).catch(()=>null);
 const cc=new Map(); const codeOf=async a=>{if(!cc.has(a))cc.set(a,String(await rpc("eth_getCode",[a,"latest"]).catch(()=>"")).toLowerCase());return cc.get(a);};
 const fullCode=async(c,code)=>code;
-const wl=readFileSync("./watch.mjs","utf8").split(/\r?\n/);
-const keccakHex=new Function(wl.slice(376,395).join("\n")+"\nreturn keccakHex;")();
+const wsrc=readFileSync("./watch.mjs","utf8");
+const ks=wsrc.indexOf("const KRC ="), ke=wsrc.indexOf("const DEPLOYERS", ks);
+const keccakHex=new Function(wsrc.slice(ks,ke)+"\nreturn keccakHex;")();
 const g=makeGate({call,codeOf,fullCode,keccakHex,cfg:{requireAutoLp:false}});
 const log=readFileSync("./data/watch.log","utf8").split(/\r?\n/);
 const seen=new Set(); const all=[];

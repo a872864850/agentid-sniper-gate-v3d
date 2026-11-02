@@ -68,8 +68,10 @@ const CRITICAL = [
 ];
 const SOFT = ['setBaseURI(string)', 'setTokenURI(uint256,string)', 'excludeFromFee(address)', 'setWhitelist(address,bool)'];
 
-const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8').split(/\r?\n/);
-const src = wl.slice(376, 395).join('\n');
+// 按文字標記切 keccak 區塊（不要用固定行號）
+const wsrc = readFileSync(join(HERE, 'watch.mjs'), 'utf8');
+const ks = wsrc.indexOf('const KRC ='), ke = wsrc.indexOf('const DEPLOYERS', ks);
+const src = wsrc.slice(ks, ke);
 const keccakHex = new Function(src + '\nreturn keccakHex;')();
 if (keccakHex('') !== 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') throw new Error('keccak 抽取失敗');
 const sel = (s) => keccakHex(Buffer.from(s, 'utf8').toString('hex')).slice(0, 8);

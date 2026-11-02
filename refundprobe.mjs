@@ -22,11 +22,15 @@
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { alert as notify } from './notify.mjs';
+import { planAlerts, formatAlerts } from './probe-diff.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const LOGF = join(HERE, 'data', 'watch.log');
-const OUTJ = join(HERE, 'data', 'refund-probe.json');
-const OUTL = join(HERE, 'data', 'refund-probe.log');
+const DATADIR = join(HERE, 'data');
+const LOGF = join(DATADIR, 'watch.log');
+const OUTJ = join(DATADIR, 'refund-probe.json');
+const OUTL = join(DATADIR, 'refund-probe.log');
+const STATEJ = join(DATADIR, 'refund-alert-state.json');
 const CFGF = join(HERE, 'config.json');
 
 const argv = process.argv.slice(2);
@@ -71,9 +75,13 @@ async function rpc(method, params) {
 const stamp = () => new Date().toLocaleString('zh-CN', { hour12: false });
 const say = (s) => { const line = `[${stamp()}] ${s}`; console.log(line); try { appendFileSync(OUTL, line + '\r\n'); } catch {} };
 
-// keccak 借用 watch.mjs 那一份（第 377–395 行），確保選擇器算得跟正式邏輯一致
-const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8').split(/\r?\n/);
-const keccakHex = new Function(wl.slice(376, 395).join('\n') + '\nreturn keccakHex;')();
+// keccak 借用 watch.mjs 那一份，確保選擇器算得跟正式邏輯一致。
+// 注意：這裡不能用固定行號（以前寫 slice(376,395)），watch.mjs 一行改動就會讓本檔啟動即崩；
+// 改成按文字標記切（11/2 11:56 修）。
+const wsrc = readFileSync(join(HERE, 'watch.mjs'), 'utf8');
+const ks = wsrc.indexOf('const KRC ='), ke = wsrc.indexOf('const DEPLOYERS', ks);
+if (ks < 0 || ke < 0) throw new Error('watch.mjs 找不到 keccak 區塊標記（const KRC / const DEPLOYERS）');
+const keccakHex = new Function(wsrc.slice(ks, ke) + '\nreturn keccakHex;')();
 if (keccakHex('') !== 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') throw new Error('keccak 抽取失敗');
 const selOf = (sig) => '0x' + keccakHex(Buffer.from(sig, 'utf8').toString('hex')).slice(0, 8);
 
@@ -91,10 +99,24 @@ const ERR_NAMES = [
 ];
 const ERR_MAP = new Map(ERR_NAMES.map((n) => [selOf(n).slice(2), n]));
 
+function dataOf(err) {
+  const d = err?.data;
+  if (typeof d === 'string') return d;
+  if (d && typeof d === 'object') return String(d.data || d.result || '');
+  return '';
+}
 function reasonOf(err) {
   const msg = String(err?.message || '');
-  const m = msg.match(/execution reverted:?\s*(.*)$/i);
-  return m ? m[1].trim() : '';
+  const m = msg.match(/execution reverted:?\s*([\s\S]*)$/i);
+  let r = m ? m[1].trim() : '';
+  // 有些節點（實測 publicnode 系列）把 revert 的位元組直接塞進 message，變成不可讀的控制字元
+  // （0x13112018 → "\u0013\u0011 \u0018"）。這種情況改讀 error.data 的十六進位，否則會被誤判成「不可判定」。
+  if (r && /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(r)) r = '';
+  if (!r) {
+    const d = dataOf(err);
+    if (/^0x[0-9a-fA-F]{8,}$/.test(d)) r = d.slice(0, 10);
+  }
+  return r;
 }
 // revert 原因清洗：控制字元、空白、單獨的 "0x" 都算「沒有原因」
 function norm(s) {
@@ -145,6 +167,9 @@ function loadTargets() {
 async function pass() {
   const { targets } = loadTargets();
   const pick = targets.slice(-LIMIT);
+  // 先讀上一輪結果當基準（等一下會覆寫 OUTJ）
+  let prevRows = [];
+  try { prevRows = JSON.parse(readFileSync(OUTJ, 'utf8').replace(/^\uFEFF/, '')).rows || []; } catch { prevRows = []; }
   const rows = [];
   for (const t of pick) {
     const code = await codeOf(t.tok);
@@ -171,11 +196,31 @@ async function pass() {
   const good = rows.filter((r) => r.level === 'ok' || r.level === 'valid');
   writeFileSync(OUTJ, JSON.stringify({ at: Date.now(), total: rows.length, valid: good.length, by, rows }, null, 1));
   say(`可退／入口有效 ${good.length}/${rows.length}；結果寫入 data/refund-probe.json`);
-  return { rows, by, valid: good.length };
+
+  // 跨輪變化偵測 → 告警（使用者 11/2 11:56「好的」）
+  let st = {};
+  try { st = JSON.parse(readFileSync(STATEJ, 'utf8').replace(/^\uFEFF/, '')) || {}; } catch { st = {}; }
+  const { alerts, suppressed, state } = planAlerts(prevRows, rows, st, Date.now());
+  try { writeFileSync(STATEJ, JSON.stringify(state, null, 1)); } catch {}
+  if (suppressed.length) say(`待確認 ${suppressed.length} 筆（涉及「不可判定」的轉折要連兩輪一致才告警）：${suppressed.map((a) => a.tok.slice(0, 10)).join(', ')}`);
+  if (alerts.length) {
+    const text = formatAlerts(alerts);
+    const r = await notify(text, { tag: 'REFUND', dataDir: DATADIR, cfgFile: CFGF });
+    const chan = r.channel === 'telegram' ? '已推 Telegram' : `落檔（${r.reason || '未設定'}）`;
+    say(`告警 ${alerts.length} 筆：${alerts.map((a) => a.kind).join(', ')} → ${chan}`);
+    for (const a of alerts) say(`  ${a.kind}  ${a.tok}  ${a.walletName}  ${a.before} → ${a.after}`);
+  } else if (!prevRows.length) {
+    say('本輪為基準輪（無上一輪可比），已記錄狀態供下輪比對');
+  } else {
+    say(`本輪無狀態變化（比對上輪 ${prevRows.length} 筆）`);
+  }
+  return { rows, by, valid: good.length, alerts };
 }
 
 if (WATCH) {
   say(`退款探測常駐（每 ${Math.round(INTERVAL / 60e3)} 分鐘；只 eth_call、不簽交易）`);
+  const hasTg = !!(readFileSync(CFGF, 'utf8').match(/"botToken"\s*:\s*"[^"]+"/));
+  say(hasTg ? '狀態變化會推 Telegram' : '未設定 telegram.botToken：狀態變化寫進 data/REFUND-ALERT.txt（填了 token 就自動改推 Telegram）');
   for (;;) { try { await pass(); } catch (e) { say('本輪出錯：' + e.message); } await sleep(INTERVAL); }
 } else {
   await pass();

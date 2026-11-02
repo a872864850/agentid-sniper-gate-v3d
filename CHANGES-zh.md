@@ -84,3 +84,15 @@ node refundprobe.mjs --watch                  # 退款探测（另开窗口/后�
 2. `data/` 未打包（含 `watch.log` 2.9MB、`watch_state.json` 2.3MB、探测 JSON），需要可单独取。
 3. `watch.mjs` 的 4 处免费补丁（`paid.freeOnly`）是上游之外的修改，重装或更新上游会丢失，需重新打。
 4. 若上游覆盖 `gate.mjs`，闸门即失效；升级后先跑一次 `node gate-window-test.mjs` 确认仍是 v3d。
+
+
+## 七、退款探测的「变化告警」（2026-11-02 12:00 新增）
+
+新增文件：`notify.mjs`、`probe-diff.mjs`、`probe-alert-test.mjs`、`start-refundprobe.cmd`
+
+- 每轮把本轮结果与上一轮 `data/refund-probe.json` 比对，只对**跨轮变化**告警：入口消失（🚨 gone）、入口变不可判定（⚠️ blind）、入口出现/恢复（✅ recovered / cleared）。
+- 涉及「不可判定」的**恶化**要连续两轮一致才告警（避免节点抖动刷屏）；改善方向立即告警；同一个变化只报一次。
+- 出口：`telegram.botToken` 有值就推 Telegram；没有就写 `data/REFUND-ALERT.txt` 与 `data/alerts.log`（每小时巡检任务会读出来播报）。
+- 顺带修掉一个真实误判：publicnode 系列节点把 revert 字节直接塞进 message（`\u0013\u0011 \u0018`），旧代码判成「不可判定」。现在改读 `error.data`，实测 **40/40** 都能识别成自定义错误 `RefundClosed()`（此前显示 24/40）。
+- keccak 抽取全部改为按 `const KRC =` / `const DEPLOYERS` 文字标记切片（原先用固定行号，watch.mjs 一改就启动崩溃）。
+- 测试：`node probe-alert-test.mjs` → **19/19 通过**（含用本机假 Telegram 服务器验证真实 POST 的 chat_id 与正文）。

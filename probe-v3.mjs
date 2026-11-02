@@ -25,8 +25,10 @@ const cc = new Map();
 async function codeOf(a) { if (!cc.has(a)) cc.set(a, String((await rpc('eth_getCode', [a, 'latest']).catch(() => '')) || '').toLowerCase()); return cc.get(a); }
 async function fullCode(c, code) { return code; }
 
-const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8').split(/\r?\n/);
-const keccakHex = new Function(wl.slice(376, 395).join('\n') + '\nreturn keccakHex;')();
+// 按文字標記切 keccak 區塊（不要用固定行號）
+const wsrc = readFileSync(join(HERE, 'watch.mjs'), 'utf8');
+const ks = wsrc.indexOf('const KRC ='), ke = wsrc.indexOf('const DEPLOYERS', ks);
+const keccakHex = new Function(wsrc.slice(ks, ke) + '\nreturn keccakHex;')();
 
 const gate = makeGate({ call, codeOf, fullCode, keccakHex, cfg: JSON.parse(process.env.GATE_CFG || '{}') });
 for (const a of process.argv.slice(2)) {
