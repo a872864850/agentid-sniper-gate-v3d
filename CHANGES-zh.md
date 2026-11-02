@@ -1,13 +1,16 @@
-# agentid-sniper 修改说明（v3d · C 方案 + 退款期 1～10 天）
+# agentid-sniper 修改说明（v3e · C 方案 + 退款期 1～10 天 + 没有官网不打）
 
-打包时间：2026-11-02 10:50（Asia/Shanghai）
-闸门版本：`GATE_VERSION = v3d`（`gate.mjs` 导出的常量可直接核验）
+打包时间：2026-11-02 10:50（Asia/Shanghai）；v3e 追加于 11:50
+闸门版本：`GATE_VERSION = v3e`、`SITE_VERSION = v1`（`gate.mjs` / `site.mjs` 导出的常量可直接核验）
 
 ## 一、本包相对上游的改动清单
 
 | 文件 | 状态 | 说明 |
 |---|---|---|
-| `gate.mjs` | **新增/重写（v3d）** | 进场闸门：四条硬条件 + 退款期软条件 |
+| `gate.mjs` | **新增/重写（v3e）** | 进场闸门：四条硬条件 + 退款期软条件 + 官网检查挂钩 |
+| `site.mjs` | **新增（v1）** | 官网判定：位元码字串 / 链上 getter / 群里网址 / DexScreener / 人工白名单 |
+| `gate-site-test.mjs` | 新增 | 9 个离线案例验证「有官网放行、没官网拦下」（不联网） |
+| `site-backtest.mjs` | 新增 | 用真实合约测「官网能不能看出来」 |
 | `gate-window-test.mjs` | 新增 | 8 个离线假合约单元测试，验证「1～10 天」判定 |
 | `gate-backtest.mjs` | 新增 | 用历史 `watch.log` 回测闸门通过率 |
 | `gate-test.mjs` | 新增 | 单合约闸门诊断工具 |
@@ -26,10 +29,25 @@
 4. **管理权限 ≤2**：`maxAdminPerms:2`，白名单只放行 `pause/unpause/setPaused` 与 `setMintStart/setStartTime/setMintTime`
 5. **（软）退款期 1～10 天**：`requireRefundWindow:"auto"`，扫到秒/区块常量就校验区间；扫不到不否决（由事后探测证明）
 6. LP 相关全部关闭：`requireAutoLp:false`、`lpMode:"off"`、`requireLpBurn:false` —— 改为开池后由 `lpwatch-loop.mjs` 事后验证
+7. **（v3e）没有官方网站不打**：`requireWebsite:true`，由 `site.mjs` 找官网；找到还要 `siteVerify` 证明首页打得开且提到这个币
 
 > 手动 `打 0x...` 不受上述限制，只约束自动流程。
 
-## 三、退款期参数
+## 三之二、官网判定（v3e）
+
+来源按「先便宜后贵」顺序，找到就停：
+
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| ① | `data/site_allow.txt` | 人工认可：一行一个合约地址或网域，直接放行、不再验证 |
+| ② | 群里传过的网址 | `watch.mjs` 的 TG 群监控把网域对到合约（需先 `node watch.mjs --tg-login` 登入一次） |
+| ③ | 合约位元码里的网址字串 | 扫 ASCII 里的 `https://…` 与域名 |
+| ④ | 链上 getter | `website() / site() / url() / homepage() / officialSite() / socials() / info() / description()` 等 15 个 |
+| ⑤ | DexScreener | `info.websites`（开池后才有，事前等于没有） |
+
+`siteVerify:true` 时会真的抓一次首页（8 秒超时）：**打不开**或**页面完全没提到这个币**都算没有官网（防假官网／死网址）。
+
+## 三之三、退款期参数
 
 ```json
 "requireRefundWindow": "auto",      // auto | true | false

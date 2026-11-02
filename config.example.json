@@ -33,7 +33,10 @@
     "requireRefundWindow": "auto",
     "refundWindowMinDays": 1,
     "refundWindowMaxDays": 10,
-    "refundProbeAfterMint": true
+    "refundProbeAfterMint": true,
+    "requireWebsite": true,
+    "siteVerify": true,
+    "siteDex": true
   },
   "rules": {
     "backX": 2,

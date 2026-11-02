@@ -29,8 +29,13 @@
 //                        掃不到不因此否決（改由 refundprobe 事後證明），
 //                        true = 一定要掃到窗口且在範圍內（最嚴），false = 不看窗口。
 //   refundWindowMinDays / refundWindowMaxDays = 1 / 10
+//
+// v3e（11/2 11:46 使用者追加）：**沒有官方網站的项目不打**。
+//   官網判定不在本檔做（來源分散：位元碼字串／鏈上 getter／群裡傳的網址／DexScreener／人工白名單），
+//   由 site.mjs 提供，watch.mjs 用 deps.siteFind 注入。本檔只負責：
+//     requireWebsite=true 時，siteFind 說沒官網 → 攔下；沒接 siteFind（例如回測）→ 直接攔（fail-closed）。
 
-export const GATE_VERSION = 'v3d';
+export const GATE_VERSION = 'v3e';
 
 export const GATE_DEFAULTS = {
   // v2
@@ -52,6 +57,8 @@ export const GATE_DEFAULTS = {
   maxAdminPerms: 2,           // 管理權限上限（pause 算 1、setMintStart 算 1）
   allowPause: true,           // pause／unpause／setPaused 允許（使用者明示許可）
   allowStartTime: true,       // setMintStart／setStartTime 允許（使用者明示許可）
+  // v3e
+  requireWebsite: false,      // 沒有官方網站就不打（預設關；watch.mjs 依 config 打開，回測不開）
 };
 
 const ROUTER_HEX = '10ed43c718714eb63d5aa57b78b54704e256024e'; // PancakeSwap V2 Router
@@ -126,10 +133,11 @@ const SOFT_SIGS = [
  * @param deps.fullCode   (addr, code) => Promise<string>
  * @param deps.keccakHex  (hexString) => string
  * @param deps.cfg        覆寫 GATE_DEFAULTS
+ * @param deps.siteFind   (addr) => Promise<{ok,host,src,why}> —— 官網檢查（site.mjs），requireWebsite 時必備
  * @param deps.log        logger
  */
 export function makeGate(deps) {
-  const { call, codeOf, fullCode, keccakHex, log = () => {} } = deps;
+  const { call, codeOf, fullCode, keccakHex, siteFind = null, log = () => {} } = deps;
   const cfg = { ...GATE_DEFAULTS, ...(deps.cfg || {}) };
   const sel = (s) => keccakHex(Buffer.from(s, 'utf8').toString('hex')).slice(0, 8);
   const map = (arr) => arr.map((s) => [sel(s), s]);
@@ -222,6 +230,7 @@ export function makeGate(deps) {
     info.owner = o && o.length >= 66 && !/^0x0{64}$/i.test(o) ? '0x' + o.slice(26, 66) : null;
     info.ownerOk = !cfg.requireRenouncedOwner || !info.owner;
 
+    // 先把「便宜」的條件算完（位元碼／鏈上讀數），再決定要不要花時間查官網
     const fails = [];
     if (cfg.requireCap && !info.capOk) fails.push('讀不到合約總量（打滿沒有依據）');
     if (cfg.requireAutoLp && !info.lpOk) {
@@ -249,6 +258,21 @@ export function makeGate(deps) {
     if (cfg.denyBackdoor && !info.permClean && !fails.length) fails.push('有跑路後門');
     if (!info.ownerOk) fails.push(`合約還有 owner（${info.owner.slice(0, 10)}…），不是放棄所有權`);
 
+    // v3e ⑧：官方網站（前面幾條都過了才查，省掉對註定要攔的合約發 HTTP）
+    info.site = null; info.siteWhy = '';
+    if (cfg.requireWebsite) {
+      if (fails.length) info.siteWhy = '其他條件先沒過，未查官網';
+      else if (typeof siteFind !== 'function') info.siteWhy = '官網檢查未接線';
+      else {
+        try {
+          const st = await siteFind(key);
+          info.site = st && st.ok ? { host: st.host, url: st.url, src: st.src } : null;
+          info.siteWhy = (st && st.why) || '查不到官網';
+        } catch (e) { info.site = null; info.siteWhy = '官網檢查出錯：' + String(e.message || e).slice(0, 60); }
+      }
+      if (!info.site) fails.push(`看不到官方網站（${info.siteWhy || '沒有'}），沒有官網的項目不打`);
+    }
+
     const rec = { t: Date.now(), v: fails.length ? fails.join('；') + '，不打' : '', info };
     cache.set(key, rec);
     if (!rec.v) {
@@ -262,6 +286,7 @@ export function makeGate(deps) {
       if (cfg.requireLpBurn) bits.push(`LP 死址 ${info.lpBurnOk ? '✅' : '❌'}`);
       bits.push(`提款 ${info.withdraws.length}`);
       bits.push(`權限 ${info.permPause.join('/') || '無'}${info.permStart.length ? '+' + info.permStart.join('/') : ''}`);
+      if (cfg.requireWebsite && info.site) bits.push(`官網 ${info.site.host}（${info.site.src}）`);
       log(`[gate ${GATE_VERSION}] 進場條件通過：${key} ` + bits.join(' · ')
         + (info.softs.length ? ` · 次要函式 ${info.softs.slice(0, 3).join('/')}` : ''));
     }

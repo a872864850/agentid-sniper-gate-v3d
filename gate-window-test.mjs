@@ -7,8 +7,11 @@ import { dirname, join } from 'node:path';
 import { makeGate, GATE_VERSION } from './gate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8').split(/\r?\n/);
-const keccakHex = new Function(wl.slice(376, 395).join('\n') + '\nreturn keccakHex;')();
+const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8');
+const ks = wl.indexOf('const KRC ='), ke = wl.indexOf('const DEPLOYERS', ks);
+if (ks < 0 || ke < 0) throw new Error('watch.mjs 裡找不到 keccak 實作，測試中止');
+const keccakHex = new Function(wl.slice(ks, ke) + '\nreturn keccakHex;')();
+if (keccakHex('') !== 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') throw new Error('keccak 抽取失敗（結果不對），測試中止');
 const sel = (s) => keccakHex(Buffer.from(s, 'utf8').toString('hex')).slice(0, 8);
 
 // 假合約：有 refund()、無提款、無治理函式、總量 500；可選塞入「窗口常數」

@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { makeGate } from './gate.mjs'; /* 使用者 11/2 09:51 + 09:52：進場條件（打滿 1 萬份寫死／自動加 LP／無管理權限） */
+import { makeSiteFinder, SITE_VERSION } from './site.mjs'; /* 使用者 11/2 11:46：沒有官方網站的项目就不打 */
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 const SELF = fileURLToPath(import.meta.url), SELF_MT = statSync(SELF).mtimeMs;
@@ -878,8 +879,30 @@ if (FREE_ONLY) setTimeout(async () => { /* 使用者 11/2：NFT 過濾自檢—�
 const codeCache = new Map();
 async function codeOf(a) { if (!codeCache.has(a)) codeCache.set(a, ((await rpc('eth_getCode', [a, 'latest']).catch(() => '')) || '').toLowerCase()); return codeCache.get(a); }
 /* 使用者 11/2 10:14 的進場條件：①總量寫死（數值不限，讀得到才算）②合約自己打滿自動加 LP ③沒有跑路後門（withdraw/改稅/黑名單/暫停/升級/換 Router 等）；實作在 gate.mjs */
-let GATE = null;
-const gate = () => (GATE || (GATE = makeGate({ call, codeOf, fullCode, keccakHex, log, cfg: CONFIG.sniping || {} })));
+/* 使用者 11/2 11:46：再加一條 ⑧「沒有官方網站的项目不打」——官網來源見 site.mjs；
+   人工認可的寫進 data/site_allow.txt（一行一個合約地址或網域，# 開頭是註解），不用等自動判斷 */
+let GATE = null, SITEF = null;
+let _allow = { m: -1, s: new Set() };
+function siteAllow() {
+  const f = join(DIR, 'data', 'site_allow.txt');
+  try {
+    const m = existsSync(f) ? statSync(f).mtimeMs : 0;
+    if (m !== _allow.m) _allow = { m, s: new Set(readFileSync(f, 'utf8').split(/\r?\n/).map((x) => String(x).trim().toLowerCase()).filter((x) => x && !x.startsWith('#'))) };
+  } catch {}
+  return _allow.s;
+}
+async function siteFind(c) {
+  if (!SITEF) SITEF = makeSiteFinder({ call, codeOf, fullCode, keccakHex, log, cfg: CONFIG.sniping || {} });
+  const P = (S.paid || {})[c] || {};
+  let nm = P.name || '', sy = '';
+  if (!nm) { try { sy = tokStr(await call(c, '0x95d89b41')) || ''; nm = tokStr(await call(c, '0x06fdde03')) || ''; } catch {} }
+  const extra = [].concat(P.fromUrl || [], P.site ? 'https://' + P.site : []);
+  const r = await SITEF(c, { allow: siteAllow(), extra, name: nm, symbol: sy });
+  if (r && r.ok) { S.paid = S.paid || {}; S.paid[c] = S.paid[c] || { at: Date.now(), name: nm || '', done: {} }; S.paid[c].site = r.host; }
+  return r;
+}
+const gate = () => (GATE || (GATE = makeGate({ call, codeOf, fullCode, keccakHex, log, siteFind, cfg: CONFIG.sniping || {} })));
+if ((CONFIG.sniping || {}).requireWebsite) setTimeout(() => log(`⚙ 官網規則：沒有官方網站的项目不打（site ${SITE_VERSION}｜來源：合約位元碼／鏈上 getter／群裡傳的網址／DexScreener；人工認可寫進 data/site_allow.txt，一行一個合約地址或網域）`), 3500);
 async function bnbUsd() {
   const p = await call(FACTORY, '0xe6a43905' + wa(WBNB) + wa(USDT)); const pair = '0x' + (p || '').slice(26); const r = await call(pair, '0x0902f1ac'); const t0 = await call(pair, '0x0dfe1681');
   if (!r || !t0) return S.lastBnbUsd || 0; const a = BigInt(r.slice(0, 66)), b = BigInt('0x' + r.slice(66, 130)); const px = t0.slice(26) === WBNB.slice(2) ? Number(b) / Number(a) : Number(a) / Number(b); if (px > 50 && px < 100000) S.lastBnbUsd = px; return px || S.lastBnbUsd || 0; /* 除錯 11/1：SENSEI 補打時節點剛好沒回 → BNB 價格 0 → 錢包成本記成 0U，被當成免費幣、2 倍沒賣回本；改成用上一次的價格 */

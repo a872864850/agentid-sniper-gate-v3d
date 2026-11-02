@@ -39,10 +39,11 @@ async function fullCode(c, code) {
   return code;
 }
 
-// keccak256 直接用 watch.mjs 裡已經在用的那一份（第 377–395 行），避免回測與正式邏輯不一致
-const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8').split(/\r?\n/);
-const src = wl.slice(376, 395).join('\n');
-const keccakHex = new Function(src + '\nreturn keccakHex;')();
+// keccak256 直接用 watch.mjs 裡已經在用的那一份，避免回測與正式邏輯不一致（用文字定位，行號會隨改版浮動）
+const wl = readFileSync(join(HERE, 'watch.mjs'), 'utf8');
+const ks = wl.indexOf('const KRC ='), ke = wl.indexOf('const DEPLOYERS', ks);
+if (ks < 0 || ke < 0) throw new Error('watch.mjs 裡找不到 keccak 實作，回測中止');
+const keccakHex = new Function(wl.slice(ks, ke) + '\nreturn keccakHex;')();
 if (keccakHex('') !== 'c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') throw new Error('keccak 抽取失敗，回測中止');
 
 const lines = readFileSync(LOG, 'utf8').split(/\r?\n/);
