@@ -2,6 +2,10 @@
 
 币安 Agentic Wallet（.ai Agent ID）专属铸造的**本地自动监控 + 自动铸造 + 自动止盈**工具。
 
+> **本分支 `feat/gate-v3d`（v2.8.3 基线）**：在上游 v2.8.3 之上增加了「进场闸门 `gate.mjs` v3d」与「只打免费 `paid.freeOnly`」两组改动。判定顺序、参数、实测数字见 [CHANGES-zh.md](CHANGES-zh.md)。上游 `main` 已进入 v3.0.0（Electron 架构），与本分支结构不同，请勿直接合并。
+>
+> 快速自检：`node gate-window-test.mjs`（应打印 `GATE_VERSION = v3d` 且 8/8 符合预期）。
+
 全部在你自己的电脑上运行：扫 BSC 新合约 → 模拟确认安全 → 用币安官方 `baw` CLI 自动铸造 → 开池后按规则自动卖出 → Telegram 通知。**不碰私钥、不使用任何 AI**，所有交易都经过币安 Agentic Wallet 的预演（preview）再执行。
 
 > ⚠️ 实验性工具，链上有风险，自负盈亏。不构成投资建议。

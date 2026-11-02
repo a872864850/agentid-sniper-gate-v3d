@@ -12,8 +12,28 @@
   },
   "timeZone": "Asia/Taipei",
   "paid": {
+    "freeOnly": true,
     "maxUsd": 20,
     "keepBnb": 0.006
+  },
+  "sniping": {
+    "requireCap": true,
+    "capMin": 5,
+    "requireAutoLp": false,
+    "lpMode": "off",
+    "denyBackdoor": true,
+    "requireRenouncedOwner": false,
+    "softAsBackdoor": false,
+    "requireRefund": true,
+    "requireLpBurn": false,
+    "requireNoWithdraw": true,
+    "maxAdminPerms": 2,
+    "allowPause": true,
+    "allowStartTime": true,
+    "requireRefundWindow": "auto",
+    "refundWindowMinDays": 1,
+    "refundWindowMaxDays": 10,
+    "refundProbeAfterMint": true
   },
   "rules": {
     "backX": 2,
